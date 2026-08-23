@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "todor.zabbix-status",
+  "name": "Zabbix status",
+  "version": "1.3.0",
+  "author": "Todor",
+  "description": "Fetches and parses ~/bin/zabbix.status from the SSH host 'do'",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Zabbix status",
+    "description": "Parsed remote Zabbix problems grouped by configuration",
+    "category": "Info",
+    "allowMultiple": false
+  }
+}
