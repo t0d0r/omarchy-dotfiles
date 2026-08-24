@@ -19,6 +19,8 @@ Panel {
   property var events: []
   property string selectedGroup: "All"
   property string selectedSeverity: "All"
+  property int selectedEventIndex: -1
+  property int copiedEventIndex: -1
   property int problemCount: 0
   property int acknowledgedCount: 0
   property string highestSeverity: "INFO"
@@ -44,6 +46,18 @@ Panel {
   }
   readonly property string severitySummary: formatSeverityCounts(events)
   readonly property var severityCounts: buildSeverityCounts(events)
+  readonly property var severityFilterOptions: {
+    var result = ["All"]
+    for (var i = 0; i < severityCounts.length; i++)
+      result.push(severityCounts[i].severity)
+    return result
+  }
+
+  onVisibleEventsChanged: selectedEventIndex = visibleEvents.length > 0 ? 0 : -1
+  onSelectedEventIndexChanged: {
+    if (selectedEventIndex >= 0)
+      Qt.callLater(function() { problemList.positionViewAtIndex(selectedEventIndex, ListView.Contain) })
+  }
 
   function normalizeSeverity(severity) {
     var normalized = String(severity || "INFO").toUpperCase()
@@ -86,6 +100,33 @@ Panel {
       "Message: " + event.message
     ].join("\n")
     Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+  }
+
+  function moveEventSelection(direction) {
+    if (visibleEvents.length === 0) {
+      selectedEventIndex = -1
+      return
+    }
+    if (selectedEventIndex < 0) {
+      selectedEventIndex = 0
+      return
+    }
+    selectedEventIndex = (selectedEventIndex + direction + visibleEvents.length) % visibleEvents.length
+  }
+
+  function moveSeverityFilter(direction) {
+    if (severityFilterOptions.length === 0) return
+    var index = severityFilterOptions.indexOf(selectedSeverity)
+    if (index < 0) index = 0
+    index = (index + direction + severityFilterOptions.length) % severityFilterOptions.length
+    selectedSeverity = severityFilterOptions[index]
+  }
+
+  function copySelectedEvent() {
+    if (selectedEventIndex < 0 || selectedEventIndex >= visibleEvents.length) return
+    copyEvent(visibleEvents[selectedEventIndex])
+    copiedEventIndex = selectedEventIndex
+    copiedReset.restart()
   }
 
   function open() { controller.show(); refresh() }
@@ -223,6 +264,12 @@ Panel {
 
   Timer { id: keyPoll; interval: 1500; onTriggered: root.refresh() }
 
+  Timer {
+    id: copiedReset
+    interval: 1200
+    onTriggered: root.copiedEventIndex = -1
+  }
+
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -233,18 +280,27 @@ Panel {
     function refresh(): void { root.refresh() }
   }
 
-  PopupCard {
+  KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
     centerOnBar: true
+    focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(640))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
 
-    Item {
+    PanelKeyCatcher {
+      id: keyCatcher
       anchors.fill: parent
+      onMoveRequested: function(dx, dy) {
+        if (dx !== 0) root.moveSeverityFilter(dx)
+        if (dy !== 0) root.moveEventSelection(dy)
+      }
+      onActivateRequested: root.copySelectedEvent()
+      onCloseRequested: root.close()
+      onTabRequested: function(direction) { root.switchPanel(direction) }
 
       Column {
         id: content
@@ -456,7 +512,9 @@ Panel {
                 width: parent.width
                 height: eventContent.implicitHeight + Style.space(18)
                 radius: Style.cornerRadius
-                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
+                color: index === root.selectedEventIndex
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+                  : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.055)
 
                 Column {
                   id: eventContent
@@ -503,7 +561,6 @@ Panel {
                   Item {
                     width: parent.width
                     height: Math.max(messageText.implicitHeight, copyButton.height)
-                    property bool copied: false
 
                     Text {
                       id: messageText
@@ -530,14 +587,14 @@ Panel {
 
                       Text {
                         anchors.centerIn: parent
-                        text: copyButton.parent.copied ? "✓" : "󰆏"
-                        color: copyButton.parent.copied ? root.foreground : root.muted
+                        text: root.copiedEventIndex === index ? "✓" : "󰆏"
+                        color: root.copiedEventIndex === index ? root.foreground : root.muted
                         font.family: root.bar ? root.bar.fontFamily : Style.font.family
                         font.pixelSize: Style.font.caption
                       }
 
                       ToolTip.visible: copyMouse.containsMouse
-                      ToolTip.text: copyButton.parent.copied ? "Copied" : "Copy event details"
+                      ToolTip.text: root.copiedEventIndex === index ? "Copied" : "Copy event details"
 
                       MouseArea {
                         id: copyMouse
@@ -545,16 +602,11 @@ Panel {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                          root.selectedEventIndex = index
                           root.copyEvent(modelData)
-                          copyButton.parent.copied = true
+                          root.copiedEventIndex = index
                           copiedReset.restart()
                         }
-                      }
-
-                      Timer {
-                        id: copiedReset
-                        interval: 1200
-                        onTriggered: copyButton.parent.copied = false
                       }
                     }
                   }
