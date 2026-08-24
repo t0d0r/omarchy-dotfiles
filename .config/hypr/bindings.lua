@@ -15,6 +15,9 @@
 -- Add a new binding.
 -- o.bind("SUPER + SHIFT + R", "SSH", "alacritty -e ssh your-server")
 
+-- Open the Zabbix detail panel directly, regardless of its bar position.
+o.bind("SUPER + Z", "Zabbix status", "omarchy-shell -q todor.zabbix-status toggle")
+
 -- Change an existing binding by unbinding it first, then binding the key again.
 -- This example changes SUPER+SPACE from the launcher to the Omarchy root menu.
 -- hl.unbind("SUPER + SPACE")
