@@ -17,6 +17,8 @@ Panel {
   property string statusText: "Checking…"
   property bool promptedForKey: false
   property var events: []
+  property string selectedGroup: "All"
+  property string selectedSeverity: "All"
   property int problemCount: 0
   property int acknowledgedCount: 0
   property string highestSeverity: "INFO"
@@ -24,6 +26,55 @@ Panel {
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color muted: Qt.darker(foreground, 1.45)
+  readonly property var groups: {
+    var result = ["All"]
+    for (var i = 0; i < events.length; i++) {
+      if (result.indexOf(events[i].group) < 0)
+        result.push(events[i].group)
+    }
+    return result
+  }
+  readonly property var visibleEvents: {
+    return events.filter(function(event) {
+      var groupMatches = selectedGroup === "All" || event.group === selectedGroup
+      var severityMatches = selectedSeverity === "All"
+        || normalizeSeverity(event.severity) === selectedSeverity
+      return groupMatches && severityMatches
+    })
+  }
+  readonly property string severitySummary: formatSeverityCounts(events)
+  readonly property var severityCounts: buildSeverityCounts(events)
+
+  function normalizeSeverity(severity) {
+    var normalized = String(severity || "INFO").toUpperCase()
+    if (normalized === "WARNING") return "WARN"
+    if (normalized === "AVERAGE") return "AVG"
+    return normalized
+  }
+
+  function buildSeverityCounts(eventList) {
+    var counts = {}
+    for (var i = 0; i < eventList.length; i++) {
+      var severity = normalizeSeverity(eventList[i].severity)
+      counts[severity] = (counts[severity] || 0) + 1
+    }
+
+    var order = ["DISASTER", "HIGH", "AVG", "WARN", "INFO"]
+    var result = []
+    for (var j = 0; j < order.length; j++) {
+      if (counts[order[j]])
+        result.push({ severity: order[j], count: counts[order[j]] })
+    }
+    return result
+  }
+
+  function formatSeverityCounts(eventList) {
+    var severityItems = buildSeverityCounts(eventList)
+    var parts = []
+    for (var i = 0; i < severityItems.length; i++)
+      parts.push(severityItems[i].severity + " " + severityItems[i].count)
+    return parts.join(" · ")
+  }
 
   function open() { controller.show(); refresh() }
   function toggle() { opened ? close() : open() }
@@ -110,14 +161,18 @@ Panel {
       }
 
       events = parsed
+      if (groups.indexOf(selectedGroup) < 0)
+        selectedGroup = "All"
+      if (selectedSeverity !== "All"
+          && !parsed.some(function(event) { return normalizeSeverity(event.severity) === selectedSeverity }))
+        selectedSeverity = "All"
       problemCount = parsed.length
       acknowledgedCount = acked
       highestSeverity = highest
       state = parsed.length > 0 ? "PROBLEM" : "OK"
       statusText = parsed.length > 0
         ? parsed.length + " problem" + (parsed.length === 1 ? "" : "s")
-          + " · " + highest + " highest"
-          + (acked > 0 ? " · " + acked + " acknowledged" : "")
+          + " · " + formatSeverityCounts(parsed)
         : "No active problems"
     }
 
@@ -218,23 +273,115 @@ Panel {
 
         Row {
           anchors.horizontalCenter: parent.horizontalCenter
-          spacing: Style.space(14)
+          spacing: Style.space(6)
 
-          Text {
-            text: root.state === "LOADING" ? "Checking…" : root.problemCount + " active"
-            color: root.problemCount > 0 ? root.severityColor(root.highestSeverity) : root.foreground
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.body
-            font.bold: true
+          Rectangle {
+            readonly property bool selected: root.selectedSeverity === "All"
+            width: allSeverityLabel.implicitWidth + Style.space(16)
+            height: Style.space(26)
+            radius: height / 2
+            color: selected
+              ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+              : "transparent"
+
+            Text {
+              id: allSeverityLabel
+              anchors.centerIn: parent
+              text: root.state === "LOADING" ? "Checking…" : root.problemCount + " active"
+              color: root.problemCount > 0 ? root.severityColor(root.highestSeverity) : root.foreground
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: parent.selected
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.selectedSeverity = "All"
+            }
           }
 
-          Text {
+          Row {
             visible: root.problemCount > 0
-            text: root.highestSeverity + " highest · " + root.acknowledgedCount + " acknowledged"
-            color: root.muted
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
+            spacing: Style.space(6)
             anchors.verticalCenter: parent.verticalCenter
+
+            Repeater {
+              model: root.severityCounts
+
+              Rectangle {
+                required property var modelData
+                readonly property bool selected: root.selectedSeverity === modelData.severity
+                width: severityLabel.implicitWidth + Style.space(16)
+                height: Style.space(26)
+                radius: height / 2
+                color: selected
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+                  : "transparent"
+
+                Text {
+                  id: severityLabel
+                  anchors.centerIn: parent
+                  text: parent.modelData.severity + " " + parent.modelData.count
+                  color: root.severityColor(parent.modelData.severity)
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.bold: parent.selected
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.selectedSeverity = parent.selected
+                    ? "All" : parent.modelData.severity
+                }
+              }
+            }
+          }
+        }
+
+        Flickable {
+          width: parent.width
+          height: Style.space(30)
+          contentWidth: categoryTabs.implicitWidth
+          contentHeight: height
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+
+          Row {
+            id: categoryTabs
+            spacing: Style.space(8)
+
+            Repeater {
+              model: root.groups
+
+              Rectangle {
+                required property string modelData
+                readonly property bool selected: root.selectedGroup === modelData
+                width: tabLabel.implicitWidth + Style.space(24)
+                height: Style.space(30)
+                radius: height / 2
+                color: selected
+                  ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.16)
+                  : Style.hoverFillFor(root.foreground, Color.accent)
+
+                Text {
+                  id: tabLabel
+                  anchors.centerIn: parent
+                  text: parent.modelData
+                  color: parent.selected ? root.foreground : root.muted
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.bold: parent.selected
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.selectedGroup = parent.modelData
+                }
+              }
+            }
           }
         }
 
@@ -248,8 +395,9 @@ Panel {
           Text {
             anchors.centerIn: parent
             width: parent.width - Style.space(40)
-            visible: root.events.length === 0
-            text: root.state === "LOADING" ? "Checking do…" : root.statusText
+            visible: root.visibleEvents.length === 0
+            text: root.state === "LOADING" ? "Checking do…"
+              : root.events.length > 0 ? "No problems match these filters" : root.statusText
             color: root.state === "ERROR" || root.state === "NEEDS_KEY" ? root.urgent : root.muted
             font.family: root.bar ? root.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.body
@@ -261,8 +409,8 @@ Panel {
             id: problemList
             anchors.fill: parent
             anchors.margins: Style.space(10)
-            visible: root.events.length > 0
-            model: root.events
+            visible: root.visibleEvents.length > 0
+            model: root.visibleEvents
             spacing: Style.space(8)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -275,11 +423,11 @@ Panel {
               height: groupLabel.height + eventCard.height + (groupLabel.visible ? Style.space(7) : 0)
 
               readonly property bool firstInGroup: index === 0
-                || root.events[index - 1].group !== modelData.group
+                || root.visibleEvents[index - 1].group !== modelData.group
 
               Text {
                 id: groupLabel
-                visible: parent.firstInGroup
+                visible: parent.firstInGroup && root.selectedGroup === "All"
                 width: parent.width
                 height: visible ? implicitHeight : 0
                 text: parent.modelData.group
