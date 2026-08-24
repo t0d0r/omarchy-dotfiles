@@ -76,6 +76,18 @@ Panel {
     return parts.join(" · ")
   }
 
+  function copyEvent(event) {
+    var text = [
+      "Time: " + event.time,
+      "Severity: " + normalizeSeverity(event.severity),
+      "State: " + event.condition,
+      "Acknowledged: " + (event.acknowledged ? "Yes" : "No"),
+      "Source: " + event.source,
+      "Message: " + event.message
+    ].join("\n")
+    Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(text) + " | wl-copy"])
+  }
+
   function open() { controller.show(); refresh() }
   function toggle() { opened ? close() : open() }
 
@@ -488,13 +500,63 @@ Panel {
                     }
                   }
 
-                  Text {
+                  Item {
                     width: parent.width
-                    text: modelData.message
-                    color: root.foreground
-                    font.family: root.bar ? root.bar.fontFamily : Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.Wrap
+                    height: Math.max(messageText.implicitHeight, copyButton.height)
+                    property bool copied: false
+
+                    Text {
+                      id: messageText
+                      anchors.left: parent.left
+                      anchors.right: copyButton.left
+                      anchors.rightMargin: Style.space(8)
+                      text: modelData.message
+                      color: root.foreground
+                      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                      font.pixelSize: Style.font.bodySmall
+                      wrapMode: Text.Wrap
+                    }
+
+                    Rectangle {
+                      id: copyButton
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      width: Style.space(26)
+                      height: Style.space(26)
+                      radius: Style.cornerRadius
+                      color: copyMouse.containsMouse
+                        ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                        : "transparent"
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: copyButton.parent.copied ? "✓" : "󰆏"
+                        color: copyButton.parent.copied ? root.foreground : root.muted
+                        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      ToolTip.visible: copyMouse.containsMouse
+                      ToolTip.text: copyButton.parent.copied ? "Copied" : "Copy event details"
+
+                      MouseArea {
+                        id: copyMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                          root.copyEvent(modelData)
+                          copyButton.parent.copied = true
+                          copiedReset.restart()
+                        }
+                      }
+
+                      Timer {
+                        id: copiedReset
+                        interval: 1200
+                        onTriggered: copyButton.parent.copied = false
+                      }
+                    }
                   }
                 }
               }
